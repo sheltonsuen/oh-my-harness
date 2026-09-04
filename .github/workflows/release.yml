@@ -166,7 +166,7 @@ jobs:
       - name: Checkout tap repo
         uses: actions/checkout@v4
         with:
-          repository: vibration-autos/homebrew-oh-my-harness
+          repository: sheltonsuen/homebrew-oh-my-harness
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 
