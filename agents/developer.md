@@ -2,7 +2,7 @@
 description: Plan and build applications
 mode: all
 temperature: 0.1
-color: #BD93F9
+color: "#BD93F9"
 steps: 10
 disable: false
 permission:
