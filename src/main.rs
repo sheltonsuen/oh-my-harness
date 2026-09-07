@@ -1,3 +1,4 @@
+mod agents;
 mod install;
 mod skills;
 mod target;
@@ -19,7 +20,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Install skills from a repo into opencode's skill roots
+    /// Install skills and agents from a repo into opencode's roots
     Install(InstallArgs),
 }
 
@@ -32,7 +33,7 @@ struct InstallArgs {
     #[arg(short = 'd', long = "dir")]
     dir: Option<PathBuf>,
 
-    /// Overwrite skills that already exist
+    /// Overwrite skills and agents that already exist
     #[arg(long)]
     force: bool,
 }
@@ -50,15 +51,30 @@ fn run() -> Result<(), String> {
             let repo = args.repo.as_deref().unwrap_or(DEFAULT_REPO);
             let home = home_dir()?;
             let dest = target::resolve_skills_dir(args.dir.as_deref(), &home);
-            let report = install::install(repo, &dest, args.force, &install::SystemGit)?;
+            let agents_dest = target::resolve_agents_dir(args.dir.as_deref(), &home);
+            let report =
+                install::install(repo, &dest, &agents_dest, args.force, &install::SystemGit)?;
             for name in &report.installed {
-                println!("installed {name} -> {}", dest.join(name).display());
+                println!("installed skill {name} -> {}", dest.join(name).display());
+            }
+            for name in &report.agents_installed {
+                println!(
+                    "installed agent {name} -> {}",
+                    agents_dest.join(format!("{name}.md")).display()
+                );
             }
             for name in &report.skipped {
-                eprintln!("skipped {name} (already exists, use --force)");
+                eprintln!("skipped skill {name} (already exists, use --force)");
             }
-            if report.installed.is_empty() && report.skipped.is_empty() {
-                println!("no skills found in {repo}");
+            for name in &report.agents_skipped {
+                eprintln!("skipped agent {name} (already exists, use --force)");
+            }
+            if report.installed.is_empty()
+                && report.skipped.is_empty()
+                && report.agents_installed.is_empty()
+                && report.agents_skipped.is_empty()
+            {
+                println!("no skills or agents found in {repo}");
             }
             Ok(())
         }

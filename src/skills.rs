@@ -6,7 +6,7 @@ pub struct Skill {
     pub path: PathBuf,
 }
 
-fn is_valid_skill_name(name: &str) -> bool {
+pub(crate) fn is_valid_name(name: &str) -> bool {
     let mut prev_was_dash = true; // reject a leading '-'
     if name.is_empty() {
         return false;
@@ -81,7 +81,7 @@ pub fn scan_skills(repo_dir: &std::path::Path) -> Result<Vec<Skill>, String> {
             let (name, _description) = parse_frontmatter(&content).ok_or_else(|| {
                 format!("skills/{folder}: invalid or missing frontmatter (name, description)")
             })?;
-            if !is_valid_skill_name(&name) {
+            if !is_valid_name(&name) {
                 return Err(format!("skills/{folder}: invalid skill name '{name}'"));
             }
             if name != folder {

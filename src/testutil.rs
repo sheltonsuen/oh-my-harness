@@ -18,3 +18,9 @@ pub fn write_skill(repo: &Path, folder: &str, content: &str) {
     fs::write(d.join("SKILL.md"), content).unwrap();
     fs::write(d.join("references").join("x.md"), "ref").unwrap();
 }
+
+pub fn write_agent(repo: &Path, file: &str, content: &str) {
+    let d = repo.join("agents");
+    fs::create_dir_all(&d).unwrap();
+    fs::write(d.join(file), content).unwrap();
+}
