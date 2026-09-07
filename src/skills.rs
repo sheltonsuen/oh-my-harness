@@ -60,10 +60,7 @@ fn parse_frontmatter(content: &str) -> Option<(String, String)> {
 pub fn scan_skills(repo_dir: &std::path::Path) -> Result<Vec<Skill>, String> {
     let skills_dir = repo_dir.join("skills");
     if !skills_dir.is_dir() {
-        return Err(format!(
-            "no skills/ directory found in {}",
-            repo_dir.display()
-        ));
+        return Ok(Vec::new());
     }
     let mut skills = Vec::new();
     for entry in std::fs::read_dir(&skills_dir).map_err(|e| e.to_string())? {
@@ -114,13 +111,10 @@ mod tests {
     }
 
     #[test]
-    fn missing_skills_dir_is_an_error() {
+    fn repo_without_skills_dir_scans_no_skills() {
         let repo = temp_repo();
-        let err = scan_skills(&repo).unwrap_err();
-        assert!(
-            err.contains("skills"),
-            "error should mention skills/: {err}"
-        );
+        let skills = scan_skills(&repo).unwrap();
+        assert!(skills.is_empty());
         fs::remove_dir_all(&repo).unwrap();
     }
 

@@ -22,10 +22,34 @@ pub fn resolve_agents_dir(
     }
 }
 
+/// opencode's global commands root is ~/.config/opencode/commands while its
+/// project-local root is .opencode/commands.
+pub fn resolve_commands_dir(
+    project_dir: Option<&std::path::Path>,
+    home: &std::path::Path,
+) -> std::path::PathBuf {
+    match project_dir {
+        Some(dir) => dir.join(".opencode").join("commands"),
+        None => home.join(".config").join("opencode").join("commands"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn commands_global_installs_to_config_opencode_commands() {
+        let dir = resolve_commands_dir(None, Path::new("/home/u"));
+        assert_eq!(dir, Path::new("/home/u/.config/opencode/commands"));
+    }
+
+    #[test]
+    fn commands_local_installs_to_dot_opencode_commands() {
+        let dir = resolve_commands_dir(Some(Path::new("/proj")), Path::new("/home/u"));
+        assert_eq!(dir, Path::new("/proj/.opencode/commands"));
+    }
 
     #[test]
     fn global_installs_to_config_opencode_skills() {

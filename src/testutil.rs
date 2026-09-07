@@ -24,3 +24,9 @@ pub fn write_agent(repo: &Path, file: &str, content: &str) {
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join(file), content).unwrap();
 }
+
+pub fn write_command(repo: &Path, file: &str, content: &str) {
+    let d = repo.join("commands");
+    fs::create_dir_all(&d).unwrap();
+    fs::write(d.join(file), content).unwrap();
+}

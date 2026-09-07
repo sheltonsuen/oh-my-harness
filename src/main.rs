@@ -1,4 +1,5 @@
 mod agents;
+mod commands;
 mod install;
 mod skills;
 mod target;
@@ -20,7 +21,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Install skills and agents from a repo into opencode's roots
+    /// Install skills, agents, and commands from a repo into opencode's roots
     Install(InstallArgs),
 }
 
@@ -33,7 +34,7 @@ struct InstallArgs {
     #[arg(short = 'd', long = "dir")]
     dir: Option<PathBuf>,
 
-    /// Overwrite skills and agents that already exist
+    /// Overwrite skills, agents, and commands that already exist
     #[arg(long)]
     force: bool,
 }
@@ -50,17 +51,22 @@ fn run() -> Result<(), String> {
         Command::Install(args) => {
             let repo = args.repo.as_deref().unwrap_or(DEFAULT_REPO);
             let home = home_dir()?;
-            let dest = target::resolve_skills_dir(args.dir.as_deref(), &home);
-            let agents_dest = target::resolve_agents_dir(args.dir.as_deref(), &home);
-            let report =
-                install::install(repo, &dest, &agents_dest, args.force, &install::SystemGit)?;
+            let dests = install::Destinations {
+                skills: target::resolve_skills_dir(args.dir.as_deref(), &home),
+                agents: target::resolve_agents_dir(args.dir.as_deref(), &home),
+                commands: target::resolve_commands_dir(args.dir.as_deref(), &home),
+            };
+            let report = install::install(repo, &dests, args.force, &install::SystemGit)?;
             for name in &report.installed {
-                println!("installed skill {name} -> {}", dest.join(name).display());
+                println!(
+                    "installed skill {name} -> {}",
+                    dests.skills.join(name).display()
+                );
             }
             for name in &report.agents_installed {
                 println!(
                     "installed agent {name} -> {}",
-                    agents_dest.join(format!("{name}.md")).display()
+                    dests.agents.join(format!("{name}.md")).display()
                 );
             }
             for name in &report.skipped {
@@ -69,12 +75,23 @@ fn run() -> Result<(), String> {
             for name in &report.agents_skipped {
                 eprintln!("skipped agent {name} (already exists, use --force)");
             }
+            for name in &report.commands_installed {
+                println!(
+                    "installed command {name} -> {}",
+                    dests.commands.join(format!("{name}.md")).display()
+                );
+            }
+            for name in &report.commands_skipped {
+                eprintln!("skipped command {name} (already exists, use --force)");
+            }
             if report.installed.is_empty()
                 && report.skipped.is_empty()
                 && report.agents_installed.is_empty()
                 && report.agents_skipped.is_empty()
+                && report.commands_installed.is_empty()
+                && report.commands_skipped.is_empty()
             {
-                println!("no skills or agents found in {repo}");
+                println!("no skills, agents, or commands found in {repo}");
             }
             Ok(())
         }

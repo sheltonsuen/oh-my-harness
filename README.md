@@ -29,5 +29,6 @@ omh install [repo] [-d <project-dir>] [--force]
 
 - `skills/<name>/` folders → `~/.config/opencode/skills/` (or `<project>/.opencode/skills/` with `-d`)
 - top-level `agents/*.md` files → `~/.config/opencode/agents/` (or `<project>/.opencode/agents/` with `-d`)
+- top-level `commands/*.md` files → `~/.config/opencode/commands/` (or `<project>/.opencode/commands/` with `-d`)
 
-`repo` is a git URL or local directory, and defaults to the oh-my-harness repo. Existing skills and agents are skipped unless `--force` overwrites them. A repo without an `agents/` directory just installs its skills.
+`repo` is a git URL or local directory, and defaults to the oh-my-harness repo. Existing skills, agents, and commands are skipped unless `--force` overwrites them. A repo must ship at least one of `skills/`, `agents/`, or `commands/`; a missing directory just installs nothing of that kind.

@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::agents::scan_agents;
+use crate::commands::scan_commands;
 use crate::skills::scan_skills;
 
 pub trait Git {
@@ -34,12 +35,22 @@ pub struct Report {
     pub skipped: Vec<String>,
     pub agents_installed: Vec<String>,
     pub agents_skipped: Vec<String>,
+    pub commands_installed: Vec<String>,
+    pub commands_skipped: Vec<String>,
+}
+
+/// Where a repo's payload gets installed: opencode's skills, agents and
+/// commands roots for either the global or a project-local configuration.
+#[derive(Debug, Clone)]
+pub struct Destinations {
+    pub skills: PathBuf,
+    pub agents: PathBuf,
+    pub commands: PathBuf,
 }
 
 pub fn install(
     repo: &str,
-    skills_dest: &Path,
-    agents_dest: &Path,
+    dests: &Destinations,
     force: bool,
     git: &dyn Git,
 ) -> Result<Report, String> {
@@ -60,7 +71,7 @@ pub fn install(
         (tmp.clone(), Some(tmp))
     };
 
-    let result = install_all(&source, repo, skills_dest, agents_dest, force);
+    let result = install_all(&source, repo, dests, force);
     if let Some(tmp) = &tmp {
         let _ = fs::remove_dir_all(tmp);
     }
@@ -70,23 +81,33 @@ pub fn install(
 fn install_all(
     source: &Path,
     label: &str,
-    skills_dest: &Path,
-    agents_dest: &Path,
+    dests: &Destinations,
     force: bool,
 ) -> Result<Report, String> {
     let strip = |e: String| e.replace(&source.display().to_string(), label);
+    if !["skills", "agents", "commands"]
+        .iter()
+        .any(|dir| source.join(dir).is_dir())
+    {
+        return Err(format!(
+            "no skills/, agents/, or commands/ directory found in {label}"
+        ));
+    }
     let skills = scan_skills(source).map_err(strip)?;
     let agents = scan_agents(source).map_err(strip)?;
+    let commands = scan_commands(source).map_err(strip)?;
     let mut report = Report::default();
-    fs::create_dir_all(skills_dest).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dests.skills).map_err(|e| e.to_string())?;
     for skill in &skills {
-        let target = skills_dest.join(&skill.name);
+        let target = dests.skills.join(&skill.name);
         if target.exists() && !force {
             report.skipped.push(skill.name.clone());
             continue;
         }
         // Copy into a staging dir first so a failed copy never destroys an existing skill.
-        let staging = skills_dest.join(format!(".{}.staging-{}", skill.name, std::process::id()));
+        let staging = dests
+            .skills
+            .join(format!(".{}.staging-{}", skill.name, std::process::id()));
         let _ = fs::remove_dir_all(&staging);
         if let Err(e) = copy_dir_all(&skill.path, &staging) {
             let _ = fs::remove_dir_all(&staging);
@@ -107,17 +128,19 @@ fn install_all(
         }
     }
     if !agents.is_empty() {
-        fs::create_dir_all(agents_dest).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&dests.agents).map_err(|e| e.to_string())?;
     }
     for agent in &agents {
-        let target = agents_dest.join(format!("{}.md", agent.name));
+        let target = dests.agents.join(format!("{}.md", agent.name));
         if target.exists() && !force {
             report.agents_skipped.push(agent.name.clone());
             continue;
         }
         // Stage beside the target and rename over it so a failed copy never destroys an existing agent.
         let staging =
-            agents_dest.join(format!(".{}.staging-{}.md", agent.name, std::process::id()));
+            dests
+                .agents
+                .join(format!(".{}.staging-{}.md", agent.name, std::process::id()));
         let _ = fs::remove_file(&staging);
         if let Err(e) = fs::copy(&agent.path, &staging) {
             let _ = fs::remove_file(&staging);
@@ -125,6 +148,34 @@ fn install_all(
         }
         match fs::rename(&staging, &target) {
             Ok(()) => report.agents_installed.push(agent.name.clone()),
+            Err(e) => {
+                let _ = fs::remove_file(&staging);
+                return Err(e.to_string());
+            }
+        }
+    }
+    if !commands.is_empty() {
+        fs::create_dir_all(&dests.commands).map_err(|e| e.to_string())?;
+    }
+    for command in &commands {
+        let target = dests.commands.join(format!("{}.md", command.name));
+        if target.exists() && !force {
+            report.commands_skipped.push(command.name.clone());
+            continue;
+        }
+        // Stage beside the target and rename over it so a failed copy never destroys an existing command.
+        let staging = dests.commands.join(format!(
+            ".{}.staging-{}.md",
+            command.name,
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&staging);
+        if let Err(e) = fs::copy(&command.path, &staging) {
+            let _ = fs::remove_file(&staging);
+            return Err(e.to_string());
+        }
+        match fs::rename(&staging, &target) {
+            Ok(()) => report.commands_installed.push(command.name.clone()),
             Err(e) => {
                 let _ = fs::remove_file(&staging);
                 return Err(e.to_string());
@@ -197,8 +248,7 @@ mod tests {
         let dest = temp_dir("url-dest");
         let report = install(
             "https://example.com/repo.git",
-            &dest,
-            &temp_dir("adest"),
+            &dests(&dest, &temp_dir("adest"), &commands_dest("adest-cmds")),
             false,
             &git,
         )
@@ -223,8 +273,7 @@ mod tests {
         fs::write(dest.join("demo").join("SKILL.md"), "my local edits").unwrap();
         let report = install(
             repo.to_str().unwrap(),
-            &dest,
-            &temp_dir("adest"),
+            &dests(&dest, &temp_dir("adest"), &commands_dest("adest-cmds")),
             false,
             &NoGit,
         )
@@ -248,8 +297,7 @@ mod tests {
         fs::write(dest.join("demo").join("stale.md"), "old").unwrap();
         let report = install(
             repo.to_str().unwrap(),
-            &dest,
-            &temp_dir("adest"),
+            &dests(&dest, &temp_dir("adest"), &commands_dest("adest-cmds")),
             true,
             &NoGit,
         )
@@ -272,8 +320,7 @@ mod tests {
         let dest = temp_dir("dest4");
         let err = install(
             repo.to_str().unwrap(),
-            &dest,
-            &temp_dir("adest"),
+            &dests(&dest, &temp_dir("adest"), &commands_dest("adest-cmds")),
             false,
             &NoGit,
         )
@@ -305,8 +352,7 @@ mod tests {
         let dest = temp_dir("fail-dest");
         let err = install(
             "https://example.com/x.git",
-            &dest,
-            &temp_dir("adest"),
+            &dests(&dest, &temp_dir("adest"), &commands_dest("adest-cmds")),
             false,
             &git,
         )
@@ -318,7 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_skills_error_names_the_repo_not_the_tmp_dir() {
+    fn missing_payload_dirs_error_names_the_repo_not_the_tmp_dir() {
         struct EmptyGit {
             clone_dir: std::cell::RefCell<Option<PathBuf>>,
         }
@@ -334,8 +380,7 @@ mod tests {
         let dest = temp_dir("label-dest");
         let err = install(
             "https://example.com/y.git",
-            &dest,
-            &temp_dir("adest"),
+            &dests(&dest, &temp_dir("adest"), &commands_dest("adest-cmds")),
             false,
             &git,
         )
@@ -343,6 +388,10 @@ mod tests {
         assert!(
             err.contains("https://example.com/y.git"),
             "error should name the repo the user passed: {err}"
+        );
+        assert!(
+            err.contains("skills/") && err.contains("agents/") && err.contains("commands/"),
+            "error should name all three payload dirs: {err}"
         );
         assert!(
             !err.contains("omh-clone"),
@@ -367,8 +416,7 @@ mod tests {
         fs::write(dest.join("demo").join("SKILL.md"), "precious").unwrap();
         let result = install(
             repo.to_str().unwrap(),
-            &dest,
-            &temp_dir("adest"),
+            &dests(&dest, &temp_dir("adest"), &commands_dest("adest-cmds")),
             true,
             &NoGit,
         );
@@ -403,8 +451,7 @@ mod tests {
         let dest = temp_dir("dest");
         let report = install(
             repo.to_str().unwrap(),
-            &dest,
-            &temp_dir("agents-dest"),
+            &dests(&dest, &temp_dir("agents-dest"), &commands_dest("cmds")),
             false,
             &NoGit,
         )
@@ -426,6 +473,18 @@ mod tests {
         temp_dir(tag).join("agents")
     }
 
+    fn commands_dest(tag: &str) -> PathBuf {
+        temp_dir(tag).join("commands")
+    }
+
+    fn dests(skills: &Path, agents: &Path, commands: &Path) -> Destinations {
+        Destinations {
+            skills: skills.to_path_buf(),
+            agents: agents.to_path_buf(),
+            commands: commands.to_path_buf(),
+        }
+    }
+
     #[test]
     fn agent_files_are_installed_and_reported() {
         let repo = temp_dir("repo-agents");
@@ -433,7 +492,13 @@ mod tests {
         crate::testutil::write_agent(&repo, "developer.md", "---\ndescription: d\n---\nBody\n");
         let dest = temp_dir("dest-agents");
         let adest = agents_dest("agents-dest-agents");
-        let report = install(repo.to_str().unwrap(), &dest, &adest, false, &NoGit).unwrap();
+        let report = install(
+            repo.to_str().unwrap(),
+            &dests(&dest, &adest, &commands_dest("cdest")),
+            false,
+            &NoGit,
+        )
+        .unwrap();
         assert_eq!(report.installed, vec!["define".to_string()]);
         assert_eq!(report.agents_installed, vec!["developer".to_string()]);
         assert!(report.agents_skipped.is_empty());
@@ -449,7 +514,13 @@ mod tests {
         write_skill(&repo, "define");
         let dest = temp_dir("dest-noagents");
         let adest = agents_dest("agents-dest-noagents");
-        let report = install(repo.to_str().unwrap(), &dest, &adest, false, &NoGit).unwrap();
+        let report = install(
+            repo.to_str().unwrap(),
+            &dests(&dest, &adest, &commands_dest("cdest")),
+            false,
+            &NoGit,
+        )
+        .unwrap();
         assert!(report.agents_installed.is_empty());
         assert!(!adest.exists(), "agents dest must not be created");
         fs::remove_dir_all(&repo).unwrap();
@@ -465,7 +536,13 @@ mod tests {
         let adest = agents_dest("agents-dest-agskip");
         fs::create_dir_all(&adest).unwrap();
         fs::write(adest.join("developer.md"), "my local edits").unwrap();
-        let report = install(repo.to_str().unwrap(), &dest, &adest, false, &NoGit).unwrap();
+        let report = install(
+            repo.to_str().unwrap(),
+            &dests(&dest, &adest, &commands_dest("cdest")),
+            false,
+            &NoGit,
+        )
+        .unwrap();
         assert_eq!(report.agents_skipped, vec!["developer".to_string()]);
         assert!(report.agents_installed.is_empty());
         assert_eq!(
@@ -486,7 +563,13 @@ mod tests {
         let adest = agents_dest("agents-dest-agforce");
         fs::create_dir_all(&adest).unwrap();
         fs::write(adest.join("developer.md"), "old").unwrap();
-        let report = install(repo.to_str().unwrap(), &dest, &adest, true, &NoGit).unwrap();
+        let report = install(
+            repo.to_str().unwrap(),
+            &dests(&dest, &adest, &commands_dest("cdest")),
+            true,
+            &NoGit,
+        )
+        .unwrap();
         assert_eq!(report.agents_installed, vec!["developer".to_string()]);
         assert_eq!(
             fs::read_to_string(adest.join("developer.md")).unwrap(),
@@ -510,7 +593,13 @@ mod tests {
         crate::testutil::write_agent(&repo, "Bad Name.md", "x");
         let dest = temp_dir("dest-agbad");
         let adest = agents_dest("agents-dest-agbad");
-        let err = install(repo.to_str().unwrap(), &dest, &adest, false, &NoGit).unwrap_err();
+        let err = install(
+            repo.to_str().unwrap(),
+            &dests(&dest, &adest, &commands_dest("cdest")),
+            false,
+            &NoGit,
+        )
+        .unwrap_err();
         assert!(
             err.contains("Bad Name"),
             "error should name offender: {err}"
@@ -538,7 +627,12 @@ mod tests {
         let adest = agents_dest("agents-dest-agfail");
         fs::create_dir_all(&adest).unwrap();
         fs::write(adest.join("developer.md"), "precious").unwrap();
-        let result = install(repo.to_str().unwrap(), &dest, &adest, true, &NoGit);
+        let result = install(
+            repo.to_str().unwrap(),
+            &dests(&dest, &adest, &commands_dest("cdest")),
+            true,
+            &NoGit,
+        );
         fs::set_permissions(
             repo.join("agents").join("developer.md"),
             fs::Permissions::from_mode(0o644),
@@ -559,5 +653,217 @@ mod tests {
         fs::remove_dir_all(&repo).unwrap();
         fs::remove_dir_all(&dest).unwrap();
         fs::remove_dir_all(&adest).unwrap();
+    }
+
+    #[test]
+    fn command_files_are_installed_and_reported() {
+        let repo = temp_dir("repo-cmds");
+        write_skill(&repo, "define");
+        crate::testutil::write_command(&repo, "kick-off.md", "---\ndescription: d\n---\nBody\n");
+        let dest = temp_dir("dest-cmds");
+        let cdest = commands_dest("cmds-dest-cmds");
+        let report = install(
+            repo.to_str().unwrap(),
+            &dests(&dest, &agents_dest("agents-dest-cmds"), &cdest),
+            false,
+            &NoGit,
+        )
+        .unwrap();
+        assert_eq!(report.installed, vec!["define".to_string()]);
+        assert_eq!(report.commands_installed, vec!["kick-off".to_string()]);
+        assert!(report.commands_skipped.is_empty());
+        assert!(cdest.join("kick-off.md").is_file());
+        fs::remove_dir_all(&repo).unwrap();
+        fs::remove_dir_all(&dest).unwrap();
+        fs::remove_dir_all(&cdest).unwrap();
+    }
+
+    #[test]
+    fn missing_commands_dir_installs_no_commands_and_creates_nothing() {
+        let repo = temp_dir("repo-nocmds");
+        write_skill(&repo, "define");
+        let dest = temp_dir("dest-nocmds");
+        let cdest = commands_dest("cmds-dest-nocmds");
+        let report = install(
+            repo.to_str().unwrap(),
+            &dests(&dest, &agents_dest("agents-dest-nocmds"), &cdest),
+            false,
+            &NoGit,
+        )
+        .unwrap();
+        assert!(report.commands_installed.is_empty());
+        assert!(!cdest.exists(), "commands dest must not be created");
+        fs::remove_dir_all(&repo).unwrap();
+        fs::remove_dir_all(&dest).unwrap();
+    }
+
+    #[test]
+    fn existing_command_is_skipped_and_left_untouched() {
+        let repo = temp_dir("repo-cmdskip");
+        write_skill(&repo, "define");
+        crate::testutil::write_command(&repo, "kick-off.md", "new content");
+        let dest = temp_dir("dest-cmdskip");
+        let cdest = commands_dest("cmds-dest-cmdskip");
+        fs::create_dir_all(&cdest).unwrap();
+        fs::write(cdest.join("kick-off.md"), "my local edits").unwrap();
+        let report = install(
+            repo.to_str().unwrap(),
+            &dests(&dest, &agents_dest("agents-dest-cmdskip"), &cdest),
+            false,
+            &NoGit,
+        )
+        .unwrap();
+        assert_eq!(report.commands_skipped, vec!["kick-off".to_string()]);
+        assert!(report.commands_installed.is_empty());
+        assert_eq!(
+            fs::read_to_string(cdest.join("kick-off.md")).unwrap(),
+            "my local edits"
+        );
+        fs::remove_dir_all(&repo).unwrap();
+        fs::remove_dir_all(&dest).unwrap();
+        fs::remove_dir_all(&cdest).unwrap();
+    }
+
+    #[test]
+    fn force_overwrites_existing_command() {
+        let repo = temp_dir("repo-cmdforce");
+        write_skill(&repo, "define");
+        crate::testutil::write_command(&repo, "kick-off.md", "new content");
+        let dest = temp_dir("dest-cmdforce");
+        let cdest = commands_dest("cmds-dest-cmdforce");
+        fs::create_dir_all(&cdest).unwrap();
+        fs::write(cdest.join("kick-off.md"), "old").unwrap();
+        let report = install(
+            repo.to_str().unwrap(),
+            &dests(&dest, &agents_dest("agents-dest-cmdforce"), &cdest),
+            true,
+            &NoGit,
+        )
+        .unwrap();
+        assert_eq!(report.commands_installed, vec!["kick-off".to_string()]);
+        assert_eq!(
+            fs::read_to_string(cdest.join("kick-off.md")).unwrap(),
+            "new content"
+        );
+        let leftovers: Vec<_> = fs::read_dir(&cdest)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with('.'))
+            .collect();
+        assert!(leftovers.is_empty(), "no staging files left: {leftovers:?}");
+        fs::remove_dir_all(&repo).unwrap();
+        fs::remove_dir_all(&dest).unwrap();
+        fs::remove_dir_all(&cdest).unwrap();
+    }
+
+    #[test]
+    fn invalid_command_aborts_before_anything_is_installed() {
+        let repo = temp_dir("repo-cmdbad");
+        write_skill(&repo, "define");
+        crate::testutil::write_command(&repo, "Bad Name.md", "x");
+        let dest = temp_dir("dest-cmdbad");
+        let cdest = commands_dest("cmds-dest-cmdbad");
+        let err = install(
+            repo.to_str().unwrap(),
+            &dests(&dest, &agents_dest("agents-dest-cmdbad"), &cdest),
+            false,
+            &NoGit,
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("Bad Name"),
+            "error should name offender: {err}"
+        );
+        assert!(
+            !dest.join("define").exists(),
+            "no skills may be installed when a command is invalid"
+        );
+        assert!(!cdest.exists());
+        fs::remove_dir_all(&repo).unwrap();
+        fs::remove_dir_all(&dest).unwrap();
+    }
+
+    #[test]
+    fn repo_with_only_commands_dir_installs_commands() {
+        let repo = temp_dir("repo-cmdsonly");
+        crate::testutil::write_command(&repo, "kick-off.md", "---\ndescription: d\n---\nBody\n");
+        let dest = temp_dir("dest-cmdsonly");
+        let cdest = commands_dest("cmds-dest-cmdsonly");
+        let report = install(
+            repo.to_str().unwrap(),
+            &dests(&dest, &agents_dest("agents-dest-cmdsonly"), &cdest),
+            false,
+            &NoGit,
+        )
+        .unwrap();
+        assert_eq!(report.commands_installed, vec!["kick-off".to_string()]);
+        assert!(report.installed.is_empty());
+        assert!(report.agents_installed.is_empty());
+        fs::remove_dir_all(&repo).unwrap();
+        fs::remove_dir_all(&dest).unwrap();
+        fs::remove_dir_all(&cdest).unwrap();
+    }
+
+    #[test]
+    fn empty_but_present_payload_dirs_pass_the_contract() {
+        let repo = temp_dir("repo-emptydirs");
+        fs::create_dir_all(repo.join("skills")).unwrap();
+        let dest = temp_dir("dest-emptydirs");
+        let cdest = commands_dest("cmds-dest-emptydirs");
+        let report = install(
+            repo.to_str().unwrap(),
+            &dests(&dest, &agents_dest("agents-dest-emptydirs"), &cdest),
+            false,
+            &NoGit,
+        )
+        .unwrap();
+        assert!(report.installed.is_empty());
+        assert!(report.agents_installed.is_empty());
+        assert!(report.commands_installed.is_empty());
+        assert!(!cdest.exists());
+        fs::remove_dir_all(&repo).unwrap();
+        fs::remove_dir_all(&dest).unwrap();
+    }
+
+    #[test]
+    fn failed_force_command_copy_leaves_existing_command_untouched() {
+        let repo = temp_dir("repo-cmddfail");
+        write_skill(&repo, "define");
+        crate::testutil::write_command(&repo, "kick-off.md", "new content");
+        fs::set_permissions(
+            repo.join("commands").join("kick-off.md"),
+            fs::Permissions::from_mode(0o000),
+        )
+        .unwrap();
+        let dest = temp_dir("dest-cmddfail");
+        let cdest = commands_dest("cmds-dest-cmddfail");
+        fs::create_dir_all(&cdest).unwrap();
+        fs::write(cdest.join("kick-off.md"), "precious").unwrap();
+        let result = install(
+            repo.to_str().unwrap(),
+            &dests(&dest, &agents_dest("agents-dest-cmddfail"), &cdest),
+            true,
+            &NoGit,
+        );
+        fs::set_permissions(
+            repo.join("commands").join("kick-off.md"),
+            fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        assert!(result.is_err(), "unreadable source must fail the install");
+        assert_eq!(
+            fs::read_to_string(cdest.join("kick-off.md")).unwrap(),
+            "precious",
+            "a failed force copy must not destroy the existing command"
+        );
+        let leftovers: Vec<_> = fs::read_dir(&cdest)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with('.'))
+            .collect();
+        assert!(leftovers.is_empty(), "no staging files left: {leftovers:?}");
+        fs::remove_dir_all(&repo).unwrap();
+        fs::remove_dir_all(&dest).unwrap();
+        fs::remove_dir_all(&cdest).unwrap();
     }
 }
