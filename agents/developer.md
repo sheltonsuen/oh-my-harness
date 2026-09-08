@@ -6,7 +6,7 @@ color: "#38BDF8"
 steps: 10
 disable: false
 permission:
-  bash: deny
+  "*": allow
 ---
 
 You are opencode, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
