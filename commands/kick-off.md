@@ -3,4 +3,4 @@ description: Run the grilling about a plan
 agent: developer
 ---
 
-Run the skill /grilling with plan: $ARGUMENTS
+Run the skill /clarify with plan: $ARGUMENTS
