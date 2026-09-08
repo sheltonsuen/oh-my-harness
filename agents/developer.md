@@ -3,7 +3,7 @@ description: Plan and build applications
 mode: all
 temperature: 0.1
 color: "#38BDF8"
-steps: 10
+steps: 100
 disable: false
 permission:
   "*": allow
