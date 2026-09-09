@@ -1,6 +1,6 @@
 ---
 name: setup-oh-my-harness
-description: "Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills."
+description: "Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, domain doc layout, and docs language. Run once before first use of the other engineering skills."
 disable-model-invocation: true
 ---
 
@@ -11,6 +11,7 @@ Scaffold the per-repo configuration that the engineering skills assume:
 - **Issue tracker**: where issues live (GitHub by default; local markdown is also supported out of the box)
 - **Triage labels**: the strings used for the five canonical triage roles
 - **Domain docs**: where `CONTEXT.md` and ADRs live, and the consumer rules for reading them
+- **Language**: the natural language every skill-written markdown in this repo is produced in
 
 This is a prompt-driven skill, not a deterministic script. Explore, present what you found, confirm with the user, then write.
 
@@ -22,6 +23,7 @@ Look at the current repo to understand its starting state. Read whatever exists;
 
 - `git remote -v` and `.git/config`: is this a GitHub repo? Which one?
 - `AGENTS.md` at the repo root: does either exist? Is there already an `## Agent skills` section in either?
+- An existing `### Language` sub-block inside the `## Agent skills` block: if present, its language is the recommended answer in Section D instead of English.
 - `CONTEXT.md` at the repo root
 - `docs/adr/` directories
 - `docs/agents/`: does this skill's prior output already exist?
@@ -60,6 +62,19 @@ The defaults are the five canonical roles, each label string equal to its name: 
 
 Offer **multi-context** (a root `CONTEXT-MAP.md` pointing to per-context `CONTEXT.md` files) only when exploration found monorepo signals. Then confirm which layout they want.
 
+**Section D: Language.** Always ask this one; never skip it silently.
+
+> Explainer: This sets the natural language every engineering skill writes its markdown in — specs, issues, task files, `CONTEXT.md`, ADRs, review reports. It affects new output only; it never rewrites or translates existing docs, and it doesn't change chat replies, commit messages, or code.
+
+Two options, recorded verbatim as the single word `English` or `Chinese`:
+
+- **English** (recommended unless exploration found an existing `### Language` block, in which case recommend its current value)
+- **Chinese**
+
+Don't ask which script (simplified vs traditional); record the generic word `Chinese` and let the agent match the user's own writing at runtime.
+
+The setting lives only as an imperative `### Language` sub-block in the `## Agent skills` block (see step 4) — no `docs/agents/` file for it. When no `### Language` sub-block exists anywhere, skills assume English; there's no separate fallback to record.
+
 ### 3. Confirm and edit
 
 Show the user a draft of:
@@ -92,9 +107,13 @@ The block:
 ### Domain docs
 
 [one-line summary of layout: "single-context" or "multi-context"]. See `docs/agents/domain.md`.
+
+### Language
+
+Write all markdown you generate for this repo — specs, issues, task files, `CONTEXT.md`, ADRs, reports — in **[the language chosen in Section D]**. Code, commands, file paths, identifiers, and quoted error messages stay verbatim. This applies to new output only; don't translate existing docs.
 ```
 
-Include the `### Triage labels` sub-block, and write `docs/agents/triage-labels.md`, only when `triage` is installed and Section B ran. When it isn't, both are omitted.
+Include the `### Triage labels` sub-block, and write `docs/agents/triage-labels.md`, only when `triage` is installed and Section B ran. When it isn't, both are omitted. The `### Language` sub-block is always included, with the language chosen in Section D.
 
 Then write the docs files using the seed templates in this skill folder as a starting point:
 
@@ -108,4 +127,4 @@ For "other" issue trackers, write `docs/agents/issue-tracker.md` from scratch us
 
 ### 5. Done
 
-Tell the user the setup is complete and which engineering skills will now read from these files. Mention they can edit `docs/agents/*.md` directly later; re-running this skill is only necessary if they want to switch issue trackers or restart from scratch.
+Tell the user the setup is complete and which engineering skills will now read from these files. Mention they can edit `docs/agents/*.md` or the `### Language` sub-block in `AGENTS.md` directly later; re-running this skill is only necessary if they want to switch issue trackers or restart from scratch.
